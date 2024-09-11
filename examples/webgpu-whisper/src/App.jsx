@@ -47,16 +47,19 @@ function App() {
     const onMessageReceived = (e) => {
       switch (e.data.status) {
         case 'loading':
+          console.log('LOADING MODEL START');
           // Model file start load: add a new progress item to the list.
           setStatus('loading');
           setLoadingMessage(e.data.data);
           break;
 
         case 'initiate':
+          console.log('INITIATE??');
           setProgressItems(prev => [...prev, e.data]);
           break;
 
         case 'progress':
+          console.log('LOADING MODEL SECTION PROGRESS');
           // Model file progress: update one of the progress items.
           setProgressItems(
             prev => prev.map(item => {
@@ -69,6 +72,7 @@ function App() {
           break;
 
         case 'done':
+          console.log('LOADING MODEL SECTION COMLETE');
           // Model file loaded: remove the progress item from the list.
           setProgressItems(
             prev => prev.filter(item => item.file !== e.data.file)
@@ -76,12 +80,13 @@ function App() {
           break;
 
         case 'ready':
+          console.log('MODEL WARM AND READY');
           // Pipeline ready: the worker is ready to accept messages.
           setStatus('ready');
-          recorderRef.current?.start();
           break;
 
         case 'start': {
+          console.log('START TEXT GENERATION');
           // Start generation
           setIsProcessing(true);
 
@@ -91,6 +96,7 @@ function App() {
           break;
 
         case 'update': {
+          console.log('TEXT GENERATION SECTION UPDATE', e.data.output);
           // Generation update: update the output text.
           const { tps } = e.data;
           setTps(tps);
@@ -98,6 +104,7 @@ function App() {
           break;
 
         case 'complete':
+          console.log('TEXT GENERATION SECTION COMPLETE', e.data.output);
           // Generation complete: re-enable the "Generate" button
           setIsProcessing(false);
           setText(e.data.output);
@@ -108,24 +115,31 @@ function App() {
     // Attach the callback function as an event listener.
     worker.current.addEventListener('message', onMessageReceived);
 
+    // Load the model when the component is mounted.
+    worker.current.postMessage({ type: 'load' });
+
     // Define a cleanup function for when the component is unmounted.
     return () => {
       worker.current.removeEventListener('message', onMessageReceived);
+      worker.current.terminate();
+      delete worker.current;
     };
   }, []);
 
-  useEffect(() => {
-    if (recorderRef.current) return; // Already set
+  const record = () => {
+    setStatus('recording started');
 
     if (navigator.mediaDevices.getUserMedia) {
       navigator.mediaDevices.getUserMedia({ audio: true })
         .then(stream => {
           setStream(stream);
 
+          console.log('SET RECORDER REF');
           recorderRef.current = new MediaRecorder(stream);
           audioContextRef.current = new AudioContext({ sampleRate: WHISPER_SAMPLING_RATE });
 
           recorderRef.current.onstart = () => {
+            console.log('RECORDER STARTED');
             setRecording(true);
             setChunks([]);
           }
@@ -144,12 +158,20 @@ function App() {
             setRecording(false);
           };
 
+          recorderRef.current.start();
         })
         .catch(err => console.error("The following error occurred: ", err));
     } else {
       console.error("getUserMedia not supported on your browser!");
     }
+  };
 
+  const stopRecording = () => {
+    recorderRef.current?.stop();
+    setStatus('ready');
+  };
+
+  useEffect(() => {
     return () => {
       recorderRef.current?.stop();
       recorderRef.current = null;
@@ -157,10 +179,12 @@ function App() {
   }, []);
 
   useEffect(() => {
+    console.log('GENERATE 0', !recorderRef.current, !recording, isProcessing, status !== 'recording started', chunks.length);
+
     if (!recorderRef.current) return;
     if (!recording) return;
     if (isProcessing) return;
-    if (status !== 'ready') return;
+    if (status !== 'recording started') return;
 
     if (chunks.length > 0) {
       // Generate from data
@@ -176,6 +200,7 @@ function App() {
           audio = audio.slice(-MAX_SAMPLES);
         }
 
+        console.log('GENERATE 1');
         worker.current.postMessage({ type: 'generate', data: { audio, language } });
       }
       fileReader.readAsArrayBuffer(blob);
@@ -183,6 +208,8 @@ function App() {
       recorderRef.current?.requestData();
     }
   }, [status, recording, isProcessing, chunks, language]);
+
+  // console.log('STATUS', status, recording, isProcessing, chunks, language);
 
   return (
     IS_WEBGPU_AVAILABLE
@@ -220,22 +247,17 @@ function App() {
 
               <div className="w-[500px] p-2">
                 <AudioVisualizer className="w-full rounded-lg" stream={stream} />
-                {status === 'ready' && <div className="relative">
+                {status === 'recording started' && <div className="relative">
                   <p className="w-full h-[80px] overflow-y-auto overflow-wrap-anywhere border rounded-lg p-2">{text}</p>
                   {tps && <span className="absolute bottom-0 right-0 px-1">{tps.toFixed(2)} tok/s</span>}
                 </div>}
 
               </div>
               {status === 'ready' && <div className='relative w-full flex justify-center'>
-                <LanguageSelector language={language} setLanguage={(e) => {
-                  recorderRef.current?.stop();
-                  setLanguage(e);
-                  recorderRef.current?.start();
-                }} />
-                <button className="border rounded-lg px-2 absolute right-2" onClick={() => {
-                  recorderRef.current?.stop();
-                  recorderRef.current?.start();
-                }}>Reset</button>
+                <button className="border rounded-lg px-2 absolute right-2" onClick={record}>Record</button>
+              </div>}
+              {status === 'recording started' && <div className='relative w-full flex justify-center'>
+                <button className="border rounded-lg px-2 absolute right-2" onClick={stopRecording}>Stop Recording</button>
               </div>
               }
               {status === 'loading' && (

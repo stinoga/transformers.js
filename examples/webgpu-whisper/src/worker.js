@@ -5,7 +5,7 @@ import {
     WhisperForConditionalGeneration,
     TextStreamer,
     full,
-} from '@xenova/transformers';
+} from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.0-alpha.15';
 
 
 const MAX_NEW_TOKENS = 64;
@@ -44,6 +44,7 @@ class AutomaticSpeechRecognitionPipeline {
 
 let processing = false;
 async function generate({ audio, language }) {
+    console.log('GENERATE 2');
     if (processing) return;
     processing = true;
 
@@ -94,6 +95,7 @@ async function generate({ audio, language }) {
 }
 
 async function load() {
+    console.log('LOAD 2222222');
     self.postMessage({
         status: 'loading',
         data: 'Loading model...'
@@ -112,6 +114,7 @@ async function load() {
     });
 
     // Run model with dummy input to compile shaders
+    console.log('AAAAAA');
     await model.generate({
         input_features: full([1, 80, 3000], 0.0),
         max_new_tokens: 1,
