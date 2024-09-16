@@ -2,7 +2,6 @@ import { useEffect, useState, useRef } from 'react';
 
 import { AudioVisualizer } from './components/AudioVisualizer';
 import Progress from './components/Progress';
-import { LanguageSelector } from './components/LanguageSelector';
 
 const IS_WEBGPU_AVAILABLE = !!navigator.gpu;
 
@@ -28,7 +27,6 @@ function App() {
   const [language, setLanguage] = useState('en');
 
   // Processing
-  const [recording, setRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [chunks, setChunks] = useState([]);
   const [stream, setStream] = useState(null);
@@ -90,8 +88,10 @@ function App() {
           // Start generation
           setIsProcessing(true);
 
-          // Request new data from the recorder
-          recorderRef.current?.requestData();
+          // Request new data from the recorder if present
+          if (recorderRef.current?.state !== "inactive") {
+            recorderRef.current?.requestData();
+          }
         }
           break;
 
@@ -107,7 +107,14 @@ function App() {
           console.log('TEXT GENERATION SECTION COMPLETE', e.data.output);
           // Generation complete: re-enable the "Generate" button
           setIsProcessing(false);
-          setText(e.data.output);
+
+          if (recorderRef.current?.state === "inactive") {
+            // TODO: do we need this dispatch?
+            // dispatch(setDictationText(""));
+            setText("");
+          } else {
+            setText(e.data.output);
+          }
           break;
       }
     };
@@ -122,14 +129,14 @@ function App() {
     return () => {
       worker.current.removeEventListener('message', onMessageReceived);
       worker.current.terminate();
-      delete worker.current;
+      worker.current = null;
     };
   }, []);
 
   const record = () => {
-    setStatus('recording started');
-
     if (navigator.mediaDevices.getUserMedia) {
+      setStatus('recording');
+
       navigator.mediaDevices.getUserMedia({ audio: true })
         .then(stream => {
           setStream(stream);
@@ -140,22 +147,27 @@ function App() {
 
           recorderRef.current.onstart = () => {
             console.log('RECORDER STARTED');
-            setRecording(true);
             setChunks([]);
           }
+
           recorderRef.current.ondataavailable = (e) => {
             if (e.data.size > 0) {
               setChunks((prev) => [...prev, e.data]);
             } else {
               // Empty chunk received, so we request new data after a short timeout
               setTimeout(() => {
-                recorderRef.current.requestData();
+                if (recorderRef.current?.state !== "inactive") {
+                  recorderRef.current?.requestData();
+                }
               }, 25);
             }
           };
 
           recorderRef.current.onstop = () => {
-            setRecording(false);
+            const tracks = stream.getTracks();
+            // When all tracks have been stopped the stream will
+            // no longer be active and release any permissioned input
+            tracks.forEach((track) => track.stop());
           };
 
           recorderRef.current.start();
@@ -179,12 +191,11 @@ function App() {
   }, []);
 
   useEffect(() => {
-    console.log('GENERATE 0', !recorderRef.current, !recording, isProcessing, status !== 'recording started', chunks.length);
+    console.log('GENERATE 0', !recorderRef.current, isProcessing, status !== 'recording', chunks.length);
 
     if (!recorderRef.current) return;
-    if (!recording) return;
     if (isProcessing) return;
-    if (status !== 'recording started') return;
+    if (status !== 'recording') return;
 
     if (chunks.length > 0) {
       // Generate from data
@@ -196,7 +207,7 @@ function App() {
         const arrayBuffer = fileReader.result;
         const decoded = await audioContextRef.current.decodeAudioData(arrayBuffer);
         let audio = decoded.getChannelData(0);
-        if (audio.length > MAX_SAMPLES) { // Get last MAX_SAMPLES
+        if (audio && audio.length > MAX_SAMPLES) { // Get last MAX_SAMPLES
           audio = audio.slice(-MAX_SAMPLES);
         }
 
@@ -207,9 +218,9 @@ function App() {
     } else {
       recorderRef.current?.requestData();
     }
-  }, [status, recording, isProcessing, chunks, language]);
+  }, [status, isProcessing, chunks, language]);
 
-  // console.log('STATUS', status, recording, isProcessing, chunks, language);
+  // console.log('STATUS', status, isProcessing, chunks, language);
 
   return (
     IS_WEBGPU_AVAILABLE
@@ -247,7 +258,7 @@ function App() {
 
               <div className="w-[500px] p-2">
                 <AudioVisualizer className="w-full rounded-lg" stream={stream} />
-                {status === 'recording started' && <div className="relative">
+                {status === 'recording' && <div className="relative">
                   <p className="w-full h-[80px] overflow-y-auto overflow-wrap-anywhere border rounded-lg p-2">{text}</p>
                   {tps && <span className="absolute bottom-0 right-0 px-1">{tps.toFixed(2)} tok/s</span>}
                 </div>}
@@ -256,7 +267,7 @@ function App() {
               {status === 'ready' && <div className='relative w-full flex justify-center'>
                 <button className="border rounded-lg px-2 absolute right-2" onClick={record}>Record</button>
               </div>}
-              {status === 'recording started' && <div className='relative w-full flex justify-center'>
+              {status === 'recording' && <div className='relative w-full flex justify-center'>
                 <button className="border rounded-lg px-2 absolute right-2" onClick={stopRecording}>Stop Recording</button>
               </div>
               }

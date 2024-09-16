@@ -5,7 +5,7 @@ import {
     WhisperForConditionalGeneration,
     TextStreamer,
     full,
-} from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.0-alpha.15';
+} from '@huggingface/transformers';
 
 
 const MAX_NEW_TOKENS = 64;
